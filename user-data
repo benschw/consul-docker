@@ -1,0 +1,42 @@
+#cloud-config
+
+
+coreos:
+  etcd:
+    # generate a new token for each unique cluster from https://discovery.etcd.io/new?size=3
+    # WARNING: replace each time you 'vagrant destroy'
+    discovery: https://discovery.etcd.io/ac7c0c156a25fc09d193939ea6c66b65
+    addr: $public_ipv4:4001
+    peer-addr: $public_ipv4:7001
+  fleet:
+    public-ip: $public_ipv4
+  units:
+    - name: etcd.service
+      command: start
+    - name: fleet.service
+      command: start
+    # - name: docker.service
+    #   drop-ins:
+    #     - name: 50-insecure-registry.conf
+    #       content: |
+    #         [Service]
+    #         Environment=DOCKER_OPTS='--insecure-registry="10.0.1.0/24"'
+    - name: consul@.service
+      command: start
+      content: |
+        [Unit]
+        Description=Consul-%i
+        After=docker.service
+        Requires=docker.service
+
+        [Service]
+        TimeoutStartSec=0
+        ExecStartPre=-/usr/bin/docker kill consul-%i
+        ExecStartPre=-/usr/bin/docker rm consul-%i
+        ExecStartPre=/usr/bin/docker pull benschw/consul
+        ExecStart=/usr/bin/docker run --name consul-%i -v /mnt:/data -p $public_ipv4:8300:8300 -p $public_ipv4:8301:8301 -p $public_ipv4:8301:8301/udp -p $public_ipv4:8302:8302 -p $public_ipv4:8302:8302/udp -p $public_ipv4:8400:8400 -p $public_ipv4:8500:8500 benschw/consul agent -server -config-dir=/config -advertise $public_ipv4 -data-dir /data -bootstrap-expect 3 -join 172.20.20.10
+        ExecStop=/usr/bin/docker stop consul-%i
+
+  update:
+    group: alpha
+    reboot-strategy: off
