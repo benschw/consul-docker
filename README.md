@@ -6,6 +6,19 @@
 
 
 ### notes
+	
+	vagrant up
+	vagrant ssh node1
+
+	fleetctl submit /etc/systemd/system/myapp@.service
+	fleetctl start myapp@{1..3}
+
+	docker run -t -i ubuntu
+	apt-get install curl dnsutils
+	dig myapp.service.consul
+	curl node3.node.dc1.consul:49154/demo
+
+
 #### buildroot
 
 	curl http://buildroot.uclibc.org/downloads/buildroot-2013.05.tar.bz2 | tar jx
@@ -33,9 +46,14 @@
 	systemctl status|start|... hello.service
 
 
+    - name: nameservers.network
+      content: |
+        [Network]
+        DNS=$public_ipv4
+        #DNS=8.8.8.8
 
 
-
+#### vagrant
 
 
 	if [ ! `which docker` ]; then

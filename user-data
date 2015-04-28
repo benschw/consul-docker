@@ -18,21 +18,22 @@ coreos:
   etcd:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new?size=3
     # WARNING: replace each time you 'vagrant destroy'
-    discovery: https://discovery.etcd.io/2af7dde939d9a952d8b752f1e78ce86e
+    discovery: https://discovery.etcd.io/c12d74334469b79f0416288088c15715
     addr: $public_ipv4:4001
     peer-addr: $public_ipv4:7001
   fleet:
     public-ip: $public_ipv4
   units:
-    - name: nameservers.network
-      content: |
-        [Network]
-        DNS=$public_ipv4
-        #DNS=8.8.8.8
     - name: etcd.service
       command: start
     - name: fleet.service
       command: start
+    - name: docker.service
+      drop-ins:
+        - name: 50-consul-dns.conf
+          content: |
+            [Service]
+            Environment='DOCKER_OPTS=--dns=$public_ipv4'
     - name: docker-tcp.socket
       command: start
       enable: true
@@ -72,6 +73,23 @@ coreos:
 
         [Install]
         WantedBy=multi-user.target
+    - name: srv-router.service
+      command: start
+      content: |
+        [Unit]
+        Description=SRV router load balancer
+        Requires=docker.service
+        After=docker.service
+
+        [Service]
+        Restart=always
+        RestartSec=5
+        ExecStartPre=-/usr/bin/docker rm -f srv-router
+        ExecStart=/usr/bin/docker run --net host -t --name srv-router  -e "NS_IP=$public_ipv4" -e "NS_PORT=53" -e "DOMAINS=edge" vlipco/srv-router
+        ExecStop=/usr/bin/docker stop srv-router
+
+        [Install]
+        WantedBy=multiuser.target
     - name: myapp@.service
       command: start
       content: |
