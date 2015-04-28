@@ -1,2 +1,4 @@
 .vagrant
 buildroot-2013.05/
+service-def-gen/service-def-gen
+app/app
