@@ -10,7 +10,7 @@ import (
 	"github.com/benschw/dns-clb-go/dns"
 )
 
-const ServiceAddress = "greeting.service.consul"
+const ServiceAddress = "myapp.service.consul"
 
 // Interface for Load Balancer
 type AddressGetter interface {
@@ -20,7 +20,7 @@ type AddressGetter interface {
 // Client Factory
 func NewGreetingClient() *GreetingClient {
 	return &GreetingClient{
-		Lb:      clb.NewClb("localhost", "53", clb.Random),
+		Lb:      clb.NewDefaultClb(clb.Random),
 		Address: ServiceAddress,
 	}
 }

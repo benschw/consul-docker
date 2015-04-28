@@ -1,42 +1,103 @@
 #cloud-config
 
-
+write_files:
+  - path: /etc/consul/config.json
+    permissions: 0644
+    owner: root
+    content: |
+        {
+            "data_dir": "/opt/consul",
+            "client_addr": "0.0.0.0",
+            "ports": {
+                "dns": 53
+            },
+            "recursors": ["8.8.8.8"],
+            "disable_update_check": true
+        }
 coreos:
   etcd:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new?size=3
     # WARNING: replace each time you 'vagrant destroy'
-    discovery: https://discovery.etcd.io/ac7c0c156a25fc09d193939ea6c66b65
+    discovery: https://discovery.etcd.io/2af7dde939d9a952d8b752f1e78ce86e
     addr: $public_ipv4:4001
     peer-addr: $public_ipv4:7001
   fleet:
     public-ip: $public_ipv4
   units:
+    - name: nameservers.network
+      content: |
+        [Network]
+        DNS=$public_ipv4
+        #DNS=8.8.8.8
     - name: etcd.service
       command: start
     - name: fleet.service
       command: start
-    # - name: docker.service
-    #   drop-ins:
-    #     - name: 50-insecure-registry.conf
-    #       content: |
-    #         [Service]
-    #         Environment=DOCKER_OPTS='--insecure-registry="10.0.1.0/24"'
-    - name: consul@.service
+    - name: docker-tcp.socket
+      command: start
+      enable: true
+      content: |
+        [Unit]
+        Description=Docker Socket for the API
+
+        [Socket]
+        ListenStream=2375
+        Service=docker.service
+        BindIPv6Only=both
+
+        [Install]
+        WantedBy=sockets.target
+    - name: consul-server.service
       command: start
       content: |
         [Unit]
-        Description=Consul-%i
+        Description=Consul Server Agent
+        Requires=docker.service
+        After=docker.service
+
+        [Service]
+        ExecStartPre=/usr/bin/mkdir -p /opt/bin
+        ExecStartPre=/usr/bin/wget -q https://dl.bintray.com/mitchellh/consul/0.5.0_linux_amd64.zip -O /tmp/consul.zip
+        ExecStartPre=/usr/bin/unzip -o /tmp/consul.zip -d /opt/bin/
+        ExecStartPre=/usr/bin/chmod +x /opt/bin/consul
+        ExecStartPre=/usr/bin/rm /tmp/consul.zip
+        ExecStart=/opt/bin/consul agent -server \
+            -config-dir=/etc/consul/ \
+            -advertise $public_ipv4 \
+            -bootstrap-expect 3
+        ExecStartPost=/bin/bash -c 'sleep 1; /opt/bin/consul join 172.20.20.10 172.20.20.11 172.20.20.12;'
+        ExecReload=/bin/kill -HUP $MAINPID
+        Restart=on-failure
+        RestartSec=20s
+
+        [Install]
+        WantedBy=multi-user.target
+    - name: myapp@.service
+      command: start
+      content: |
+        RestartSec=20s
+        [Unit]
+        Description=My App
         After=docker.service
         Requires=docker.service
 
         [Service]
         TimeoutStartSec=0
-        ExecStartPre=-/usr/bin/docker kill consul-%i
-        ExecStartPre=-/usr/bin/docker rm consul-%i
-        ExecStartPre=/usr/bin/docker pull benschw/consul
-        ExecStart=/usr/bin/docker run --name consul-%i -v /mnt:/data -p $public_ipv4:8300:8300 -p $public_ipv4:8301:8301 -p $public_ipv4:8301:8301/udp -p $public_ipv4:8302:8302 -p $public_ipv4:8302:8302/udp -p $public_ipv4:8400:8400 -p $public_ipv4:8500:8500 benschw/consul agent -server -config-dir=/config -advertise $public_ipv4 -data-dir /data -bootstrap-expect 3 -join 172.20.20.10
-        ExecStop=/usr/bin/docker stop consul-%i
+        ExecStartPre=-/usr/bin/docker kill myapp-%i
+        ExecStartPre=-/usr/bin/docker rm myapp-%i
+        ExecStartPre=/usr/bin/docker pull benschw/app
+        ExecStartPre=/usr/bin/docker pull benschw/service-def-gen
+        ExecStart=/usr/bin/docker run --name myapp-%i -p 8080 benschw/app
+        ExecStartPost=/bin/bash -c "sleep 1; ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`; PORT=`docker port myapp-%i 8080 | awk -F: '{print \$2}'`; docker run benschw/service-def-gen -name myapp -ip $ETH1 -port $PORT > /etc/consul/myapp-%i.json"
+        ExecStartPost=/usr/bin/systemctl reload consul-server
+        ExecStop=/bin/rm /etc/consul/myapp-%i.json
+        ExecStop=/usr/bin/systemctl reload consul-server
+        ExecStop=/bin/sleep 5
+        ExecStop=/usr/bin/docker stop myapp-%i
 
+        [X-Fleet]
+        Conflicts=myapp@*.service
   update:
     group: alpha
     reboot-strategy: off
+
