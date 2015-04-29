@@ -46,11 +46,49 @@
 	systemctl status|start|... hello.service
 
 
+  - path: /etc/consul/config.json
+    permissions: 0644
+    owner: root
+    content: |
+        {
+            "data_dir": "/opt/consul",
+            "client_addr": "0.0.0.0",
+            "ports": {
+                "dns": 53
+            },
+            "recursors": ["8.8.8.8"],
+            "disable_update_check": true
+        }
+
     - name: nameservers.network
       content: |
         [Network]
         DNS=$public_ipv4
         #DNS=8.8.8.8
+
+    - name: consul-server.service
+      command: start
+      content: |
+        [Unit]
+        Description=Consul Server Agent
+        Requires=docker.service
+        After=docker.service
+
+        [Service]
+        ExecStartPre=/usr/bin/mkdir -p /opt/bin
+        ExecStartPre=/usr/bin/wget -q https://dl.bintray.com/mitchellh/consul/0.5.0_linux_amd64.zip -O /tmp/consul.zip
+        ExecStartPre=/usr/bin/unzip -o /tmp/consul.zip -d /opt/bin/
+        ExecStartPre=/usr/bin/chmod +x /opt/bin/consul
+        ExecStartPre=/usr/bin/rm /tmp/consul.zip
+        ExecStart=/bin/bash -c '/opt/bin/consul agent -server -config-dir=/etc/consul/ -advertise $public_ipv4 -bootstrap-expect 3 $(/etc/systems/scripts/consul-join-args)'
+        ExecStartPost=/usr/bin/etcdctl set consul.io/nodes/%m $public_ipv4
+        ExecReload=/bin/kill -HUP $MAINPID
+        ExecStop=/usr/bin/etcdctl rm consul.io/nodes/%m
+        Restart=on-failure
+        RestartSec=20s
+
+        [Install]
+        WantedBy=multi-user.target
 
 
 #### vagrant

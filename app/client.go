@@ -31,8 +31,10 @@ type GreetingClient struct {
 	Address string
 }
 
-func (c *GreetingClient) GetGreeting() ([]byte, error) {
+func (c *GreetingClient) GetGreeting() (Greeting, error) {
+	var greeting Greeting
 	host, _ := c.Lb.GetAddress(c.Address)
 	r, _ := rest.MakeRequest("GET", fmt.Sprintf("http://%s/greeting", host), nil)
-	return rest.ProcessResponseBytes(r, http.StatusOK)
+	err := rest.ProcessResponseEntity(r, &greeting, http.StatusOK)
+	return greeting, err
 }

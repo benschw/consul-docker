@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/benschw/dns-clb-go/dns"
@@ -24,7 +25,9 @@ func (lb *GreetingAddressGetter) GetAddress(address string) (dns.Address, error)
 // exercise running server with the client
 func TestGreetingEndpoint(t *testing.T) {
 	// given
-	expectedGreeting := "\"hello world\""
+	host, _ := os.Hostname()
+
+	expectedGreeting := &Greeting{Message: "hello from greeting on " + host + "/" + rando.MyIp()}
 
 	address := dns.Address{Address: "localhost", Port: uint16(rando.Port())}
 
@@ -40,8 +43,8 @@ func TestGreetingEndpoint(t *testing.T) {
 	greeting, _ := client.GetGreeting()
 
 	// then
-	if expectedGreeting != string(greeting[:]) {
-		t.Errorf("expected '%s', got '%s'", expectedGreeting, greeting)
+	if expectedGreeting.Message != greeting.Message {
+		t.Errorf("expected '%s', got '%s'", expectedGreeting.Message, greeting.Message)
 	}
 
 	// teardown

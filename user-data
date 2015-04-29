@@ -1,24 +1,10 @@
 #cloud-config
 
-write_files:
-  - path: /etc/consul/config.json
-    permissions: 0644
-    owner: root
-    content: |
-        {
-            "data_dir": "/opt/consul",
-            "client_addr": "0.0.0.0",
-            "ports": {
-                "dns": 53
-            },
-            "recursors": ["8.8.8.8"],
-            "disable_update_check": true
-        }
 coreos:
   etcd:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new?size=3
     # WARNING: replace each time you 'vagrant destroy'
-    discovery: https://discovery.etcd.io/c12d74334469b79f0416288088c15715
+    discovery: https://discovery.etcd.io/3c7be8861a7e471afed019b1c169525f
     addr: $public_ipv4:4001
     peer-addr: $public_ipv4:7001
   fleet:
@@ -57,17 +43,14 @@ coreos:
         After=docker.service
 
         [Service]
-        ExecStartPre=/usr/bin/mkdir -p /opt/bin
-        ExecStartPre=/usr/bin/wget -q https://dl.bintray.com/mitchellh/consul/0.5.0_linux_amd64.zip -O /tmp/consul.zip
-        ExecStartPre=/usr/bin/unzip -o /tmp/consul.zip -d /opt/bin/
-        ExecStartPre=/usr/bin/chmod +x /opt/bin/consul
-        ExecStartPre=/usr/bin/rm /tmp/consul.zip
-        ExecStart=/opt/bin/consul agent -server \
-            -config-dir=/etc/consul/ \
-            -advertise $public_ipv4 \
-            -bootstrap-expect 3
-        ExecStartPost=/bin/bash -c 'sleep 1; /opt/bin/consul join 172.20.20.10 172.20.20.11 172.20.20.12;'
-        ExecReload=/bin/kill -HUP $MAINPID
+        ExecStartPre=-/usr/bin/docker kill consul
+        ExecStartPre=-/usr/bin/docker rm consul
+        ExecStartPre=/usr/bin/docker pull benschw/consul
+        ExecStart=/bin/bash -c 'docker run --name consul -h %H -v /mnt/consul-data:/data -v /mnt/consul-services:/service-config -p $public_ipv4:8300:8300 -p $public_ipv4:8301:8301 -p $public_ipv4:8301:8301/udp -p $public_ipv4:8302:8302 -p $public_ipv4:8302:8302/udp -p $public_ipv4:8400:8400 -p $public_ipv4:8500:8500 -p $public_ipv4:53:53 -p $public_ipv4:53:53/udp benschw/consul agent -server -config-dir=/config -config-dir=/service-config -advertise $public_ipv4 -data-dir /data -bootstrap-expect 3 $(/etc/systems/scripts/consul-join-args)'
+        ExecStartPost=/usr/bin/etcdctl set consul.io/nodes/%m $public_ipv4
+        ExecReload=/usr/bin/docker kill -s HUP consul
+        ExecStop=/usr/bin/etcdctl rm consul.io/nodes/%m
+        ExecStop=/usr/bin/docker stop consul
         Restart=on-failure
         RestartSec=20s
 
@@ -90,6 +73,31 @@ coreos:
 
         [Install]
         WantedBy=multiuser.target
+    - name: consul-ui@.service
+      command: start
+      content: |
+        RestartSec=20s
+        [Unit]
+        Description=Consul Web UI
+        After=docker.service
+        Requires=docker.service
+
+        [Service]
+        TimeoutStartSec=0
+        ExecStartPre=-/usr/bin/docker kill consul-ui-%i
+        ExecStartPre=-/usr/bin/docker rm consul-ui-%i
+        ExecStartPre=/usr/bin/docker pull benschw/consul-ui
+        ExecStartPre=/usr/bin/docker pull benschw/service-def-gen
+        ExecStart=/bin/bash -c 'docker run --name consul-ui-%i -p 8500 -p 8300 benschw/consul-ui agent -node %H-ui -config-dir=/config -ui-dir /ui -data-dir /data $(/etc/systems/scripts/consul-join-args)'
+        ExecStartPost=/bin/bash -c "sleep 1; ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`; PORT=`docker port consul-ui-%i 8500 | awk -F: '{print \$2}'`; docker run benschw/service-def-gen -name consul-ui -ip $ETH1 -port $PORT > /mnt/consul-services/consul-ui-%i.json"
+        ExecStartPost=/usr/bin/systemctl reload consul-server
+        ExecStop=/bin/rm /mnt/consul-services/consul-ui-%i.json
+        ExecStop=/usr/bin/systemctl reload consul-server
+        ExecStop=/bin/sleep 5
+        ExecStop=/usr/bin/docker stop consul-ui-%i
+
+        [X-Fleet]
+        Conflicts=consul-ui@*.service
     - name: myapp@.service
       command: start
       content: |
@@ -106,9 +114,9 @@ coreos:
         ExecStartPre=/usr/bin/docker pull benschw/app
         ExecStartPre=/usr/bin/docker pull benschw/service-def-gen
         ExecStart=/usr/bin/docker run --name myapp-%i -p 8080 benschw/app
-        ExecStartPost=/bin/bash -c "sleep 1; ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`; PORT=`docker port myapp-%i 8080 | awk -F: '{print \$2}'`; docker run benschw/service-def-gen -name myapp -ip $ETH1 -port $PORT > /etc/consul/myapp-%i.json"
+        ExecStartPost=/bin/bash -c "sleep 1; ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`; PORT=`docker port myapp-%i 8080 | awk -F: '{print \$2}'`; docker run benschw/service-def-gen -name myapp -ip $ETH1 -port $PORT > /mnt/consul-services/myapp-%i.json"
         ExecStartPost=/usr/bin/systemctl reload consul-server
-        ExecStop=/bin/rm /etc/consul/myapp-%i.json
+        ExecStop=/bin/rm /mnt/consul-services/myapp-%i.json
         ExecStop=/usr/bin/systemctl reload consul-server
         ExecStop=/bin/sleep 5
         ExecStop=/usr/bin/docker stop myapp-%i
@@ -119,3 +127,23 @@ coreos:
     group: alpha
     reboot-strategy: off
 
+write_files:
+  - path: /etc/systems/scripts/consul-join-args
+    permissions: 0755
+    owner: root
+    content: |
+        #!/bin/bash
+
+        etcdctl ls /consul.io/nodes > /dev/null || etcdctl mkdir /consul.io/nodes > /dev/null
+        nodes=($(etcdctl ls /consul.io/nodes))
+
+        if [[ ${#nodes[@]} > 0 ]]; then
+            ips=()
+            for i in "${nodes[@]}"
+            do
+                    ips+=($(etcdctl get $i))
+            done
+
+            ip_str=$(printf " %s" "${ips[@]}")
+            echo "--join ${ip_str:1}"
+        fi
