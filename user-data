@@ -4,7 +4,7 @@ coreos:
   etcd:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new?size=3
     # WARNING: replace each time you 'vagrant destroy'
-    discovery: https://discovery.etcd.io/3c7be8861a7e471afed019b1c169525f
+    discovery: https://discovery.etcd.io/9c6529037c966f9218c351e271760152
     addr: $public_ipv4:4001
     peer-addr: $public_ipv4:7001
   fleet:
@@ -68,7 +68,7 @@ coreos:
         Restart=always
         RestartSec=5
         ExecStartPre=-/usr/bin/docker rm -f srv-router
-        ExecStart=/usr/bin/docker run --net host -t --name srv-router  -e "NS_IP=$public_ipv4" -e "NS_PORT=53" -e "DOMAINS=edge" vlipco/srv-router
+        ExecStart=/usr/bin/docker run --net host -t --name srv-router  -e "NS_IP=$public_ipv4" -e "NS_PORT=53" -e "DOMAINS=edge" -e "TARGET=service.consul" vlipco/srv-router
         ExecStop=/usr/bin/docker stop srv-router
 
         [Install]
@@ -87,12 +87,10 @@ coreos:
         ExecStartPre=-/usr/bin/docker kill consul-ui-%i
         ExecStartPre=-/usr/bin/docker rm consul-ui-%i
         ExecStartPre=/usr/bin/docker pull benschw/consul-ui
-        ExecStartPre=/usr/bin/docker pull benschw/service-def-gen
-        ExecStart=/bin/bash -c 'docker run --name consul-ui-%i -p 8500 -p 8300 benschw/consul-ui agent -node %H-ui -config-dir=/config -ui-dir /ui -data-dir /data $(/etc/systems/scripts/consul-join-args)'
-        ExecStartPost=/bin/bash -c "sleep 1; ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`; PORT=`docker port consul-ui-%i 8500 | awk -F: '{print \$2}'`; docker run benschw/service-def-gen -name consul-ui -ip $ETH1 -port $PORT > /mnt/consul-services/consul-ui-%i.json"
-        ExecStartPost=/usr/bin/systemctl reload consul-server
-        ExecStop=/bin/rm /mnt/consul-services/consul-ui-%i.json
-        ExecStop=/usr/bin/systemctl reload consul-server
+        ExecStart=/bin/bash -c 'docker run --name consul-ui-%i -p 8500 -p 8300 -p 8300/udp benschw/consul-ui agent -node %H-ui -config-dir=/config -ui-dir /ui -data-dir /data $(/etc/systems/scripts/consul-join-args)'
+        ExecStartPost=/bin/sleep 1
+        ExecStartPost=/etc/systems/scripts/webapp register 8500 consul-ui consul-ui-%i
+        ExecStop=/etc/systems/scripts/webapp deregister 8500 consul-ui consul-ui-%i
         ExecStop=/bin/sleep 5
         ExecStop=/usr/bin/docker stop consul-ui-%i
 
@@ -112,12 +110,10 @@ coreos:
         ExecStartPre=-/usr/bin/docker kill myapp-%i
         ExecStartPre=-/usr/bin/docker rm myapp-%i
         ExecStartPre=/usr/bin/docker pull benschw/app
-        ExecStartPre=/usr/bin/docker pull benschw/service-def-gen
         ExecStart=/usr/bin/docker run --name myapp-%i -p 8080 benschw/app
-        ExecStartPost=/bin/bash -c "sleep 1; ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`; PORT=`docker port myapp-%i 8080 | awk -F: '{print \$2}'`; docker run benschw/service-def-gen -name myapp -ip $ETH1 -port $PORT > /mnt/consul-services/myapp-%i.json"
-        ExecStartPost=/usr/bin/systemctl reload consul-server
-        ExecStop=/bin/rm /mnt/consul-services/myapp-%i.json
-        ExecStop=/usr/bin/systemctl reload consul-server
+        ExecStartPost=/bin/sleep 1
+        ExecStartPost=/etc/systems/scripts/webapp register 8080 myapp myapp-%i
+        ExecStop=/etc/systems/scripts/webapp deregister 8080 myapp myapp-%i
         ExecStop=/bin/sleep 5
         ExecStop=/usr/bin/docker stop myapp-%i
 
@@ -147,3 +143,35 @@ write_files:
             ip_str=$(printf " %s" "${ips[@]}")
             echo "--join ${ip_str:1}"
         fi
+  - path: /etc/systems/scripts/webapp
+    permissions: 0755
+    owner: root
+    content: |
+        #!/bin/bash
+
+        register() {
+            port=$1
+            svc_name=$2
+            docker_name=$3
+
+            ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`
+            PORT_EXT=`docker port $docker_name $port | awk -F: '{print \$2}'`
+            
+            docker run --rm benschw/service-def-gen -name $svc_name -ip $ETH1 -port $PORT_EXT > /mnt/consul-services/$docker_name.json
+
+            systemctl reload consul-server
+        }
+
+        deregister() {
+            image=$1
+            svc_name=$2
+            docker_name=$3
+
+            rm /mnt/consul-services/$docker_name.json
+            systemctl reload consul-server
+        }
+
+        case $1 in
+          register|deregister) "$1" $2 $3 $4;;
+        esac
+
