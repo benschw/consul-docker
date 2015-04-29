@@ -88,10 +88,8 @@ coreos:
         ExecStartPre=-/usr/bin/docker rm consul-ui-%i
         ExecStartPre=/usr/bin/docker pull benschw/consul-ui
         ExecStart=/bin/bash -c 'docker run --name consul-ui-%i -p 8500 -p 8300 -p 8300/udp benschw/consul-ui agent -node %H-ui -config-dir=/config -ui-dir /ui -data-dir /data $(/etc/systems/scripts/consul-join-args)'
-        ExecStartPost=/bin/sleep 1
         ExecStartPost=/etc/systems/scripts/webapp register 8500 consul-ui consul-ui-%i
         ExecStop=/etc/systems/scripts/webapp deregister 8500 consul-ui consul-ui-%i
-        ExecStop=/bin/sleep 5
         ExecStop=/usr/bin/docker stop consul-ui-%i
 
         [X-Fleet]
@@ -111,10 +109,8 @@ coreos:
         ExecStartPre=-/usr/bin/docker rm myapp-%i
         ExecStartPre=/usr/bin/docker pull benschw/app
         ExecStart=/usr/bin/docker run --name myapp-%i -p 8080 benschw/app
-        ExecStartPost=/bin/sleep 1
         ExecStartPost=/etc/systems/scripts/webapp register 8080 myapp myapp-%i
         ExecStop=/etc/systems/scripts/webapp deregister 8080 myapp myapp-%i
-        ExecStop=/bin/sleep 5
         ExecStop=/usr/bin/docker stop myapp-%i
 
         [X-Fleet]
@@ -157,18 +153,20 @@ write_files:
             ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`
             PORT_EXT=`docker port $docker_name $port | awk -F: '{print \$2}'`
             
+            sleep 1
             docker run --rm benschw/service-def-gen -name $svc_name -ip $ETH1 -port $PORT_EXT > /mnt/consul-services/$docker_name.json
 
             systemctl reload consul-server
         }
 
         deregister() {
-            image=$1
+            port=$1
             svc_name=$2
             docker_name=$3
 
             rm /mnt/consul-services/$docker_name.json
             systemctl reload consul-server
+            sleep 5
         }
 
         case $1 in
