@@ -2,7 +2,8 @@
 
 [buildroot](http://buildroot.uclibc.org/)
 
-[docker consul](https://github.com/progrium/docker-consul)
+[docker consul](https://github.com/benschw/docker-consul)
+
 
 
 ### notes
