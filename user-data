@@ -155,7 +155,9 @@ write_files:
             ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`
             PORT_EXT=`docker port $docker_name $port | awk -F: '{print \$2}'`
             
-            docker run benschw/service-def-gen -name $svc_name -ip $ETH1 -port $PORT_EXT > /mnt/consul-services/$docker_name.json
+            printf '{"service":{"name":"%s","address":"%s","port":%s, "checks":[{"script":"%s","interval":"%s"}]}}\n' \
+                "$svc_name" "$ETH1" "$PORT_EXT" "exit 0" "5s" > \
+                 /mnt/consul-services/$docker_name.json
 
             systemctl reload consul-server
         }
