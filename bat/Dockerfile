@@ -1,4 +1,5 @@
-FROM benschw/litefs
+FROM ubuntu
+#FROM benschw/litefs
 
 ADD ./bat /usr/bin/bat
 
