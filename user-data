@@ -155,8 +155,11 @@ write_files:
             ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`
             PORT_EXT=`docker port $docker_name $port | awk -F: '{print \$2}'`
             
+            #HEALTH="docker run -t -i benschw/bat http://$ETH1:$PORT_EXT/greeting | grep '200 OK' > /dev/null"
+            HEALTH="exit 0"
+            
             printf '{"service":{"name":"%s","address":"%s","port":%s, "checks":[{"script":"%s","interval":"%s"}]}}\n' \
-                "$svc_name" "$ETH1" "$PORT_EXT" "exit 0" "5s" > \
+                "$svc_name" "$ETH1" "$PORT_EXT" "$HEALTH" "5s" > \
                  /mnt/consul-services/$docker_name.json
 
             systemctl reload consul-server
@@ -165,7 +168,7 @@ write_files:
         deregister() {
             port=$1
             svc_name=$2
-            docker_name=$3
+            docker_name=$3NewDefaultClb
 
             rm /mnt/consul-services/$docker_name.json
             systemctl reload consul-server
