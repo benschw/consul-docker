@@ -4,7 +4,7 @@ coreos:
   etcd:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new?size=3
     # WARNING: replace each time you 'vagrant destroy'
-    discovery: https://discovery.etcd.io/2ae247c52711f89130a5f9e39a2a7b5d
+    discovery: https://discovery.etcd.io/f9a64160c82ac143606a80215fafd236
     addr: $public_ipv4:4001
     peer-addr: $public_ipv4:7001
   fleet:
@@ -86,7 +86,7 @@ coreos:
         TimeoutStartSec=0
         ExecStartPre=-/usr/bin/docker kill consul-ui-%i
         ExecStartPre=-/usr/bin/docker rm consul-ui-%i
-        ExecStartPre=/usr/bin/docker pull benschw/consul-ui
+        ExecStartPre=/usr/bin/docker pull benschw/consul
         ExecStart=/bin/bash -c 'docker run --name consul-ui-%i -p 8500 -p 8300 -p 8300/udp benschw/consul agent -node %H-ui -config-dir=/config -ui-dir /ui -data-dir /data $(/etc/systemd/scripts/consul-join-args)'
         ExecStartPost=/etc/systemd/scripts/webapp register 8500 consul-ui consul-ui-%i
         ExecStop=/etc/systemd/scripts/webapp deregister 8500 consul-ui consul-ui-%i
