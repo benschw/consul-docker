@@ -8,3 +8,7 @@ type DemoGreeting struct {
 type Greeting struct {
 	Message string
 }
+
+type HealthStatus struct {
+	Status string `json:"status"`
+}

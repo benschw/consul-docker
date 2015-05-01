@@ -9,11 +9,18 @@ import (
 	"github.com/benschw/opin-go/rest"
 )
 
-func DemoHandler(resp http.ResponseWriter, req *http.Request) {
+type Resource struct {
+	Client *GreetingClient
+}
+
+func (r *Resource) StatusHandler(resp http.ResponseWriter, req *http.Request) {
+	rest.SetOKResponse(resp, HealthStatus{Status: "UP"})
+}
+
+func (r *Resource) DemoHandler(resp http.ResponseWriter, req *http.Request) {
 	host, _ := os.Hostname()
 
-	client := NewGreetingClient()
-	greeting, _ := client.GetGreeting()
+	greeting, _ := r.Client.GetGreeting()
 
 	rest.SetOKResponse(resp, &DemoGreeting{
 		Message:  "hello from demo on " + host + "/" + rando.MyIp(),
@@ -21,8 +28,7 @@ func DemoHandler(resp http.ResponseWriter, req *http.Request) {
 	})
 }
 
-// Resource Handler for `/greeting`
-func GreetingHandler(resp http.ResponseWriter, req *http.Request) {
+func (r *Resource) GreetingHandler(resp http.ResponseWriter, req *http.Request) {
 	host, _ := os.Hostname()
 
 	rest.SetOKResponse(resp, Greeting{Message: "hello from greeting on " + host + "/" + rando.MyIp()})
@@ -30,7 +36,12 @@ func GreetingHandler(resp http.ResponseWriter, req *http.Request) {
 
 // Wire and start http server
 func RunServer(server *ophttp.Server) {
-	http.Handle("/greeting", http.HandlerFunc(GreetingHandler))
-	http.Handle("/demo", http.HandlerFunc(DemoHandler))
+
+	r := &Resource{Client: NewGreetingClient()}
+
+	http.Handle("/status", http.HandlerFunc(r.StatusHandler))
+
+	http.Handle("/greeting", http.HandlerFunc(r.GreetingHandler))
+	http.Handle("/demo", http.HandlerFunc(r.DemoHandler))
 	server.Start()
 }

@@ -4,7 +4,7 @@ coreos:
   etcd:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new?size=3
     # WARNING: replace each time you 'vagrant destroy'
-    discovery: https://discovery.etcd.io/f9a64160c82ac143606a80215fafd236
+    discovery: https://discovery.etcd.io/2855f4d71d6d454ea6b926a2e6eaae30
     addr: $public_ipv4:4001
     peer-addr: $public_ipv4:7001
   fleet:
@@ -88,8 +88,8 @@ coreos:
         ExecStartPre=-/usr/bin/docker rm consul-ui-%i
         ExecStartPre=/usr/bin/docker pull benschw/consul
         ExecStart=/bin/bash -c 'docker run --name consul-ui-%i -p 8500 -p 8300 -p 8300/udp benschw/consul agent -node %H-ui -config-dir=/config -ui-dir /ui -data-dir /data $(/etc/systemd/scripts/consul-join-args)'
-        ExecStartPost=/etc/systemd/scripts/webapp register 8500 consul-ui consul-ui-%i
-        ExecStop=/etc/systemd/scripts/webapp deregister 8500 consul-ui consul-ui-%i
+        ExecStartPost=/etc/systemd/scripts/registration register 8500 consul-ui consul-ui-%i "exit 0" "5s"
+        ExecStop=/etc/systemd/scripts/registration deregister 8500 consul-ui consul-ui-%i
         ExecStop=/usr/bin/docker stop consul-ui-%i
 
         [X-Fleet]
@@ -109,12 +109,33 @@ coreos:
         ExecStartPre=-/usr/bin/docker rm myapp-%i
         ExecStartPre=/usr/bin/docker pull benschw/app
         ExecStart=/usr/bin/docker run --name myapp-%i -p 8080 benschw/app
-        ExecStartPost=/etc/systemd/scripts/webapp register 8080 myapp myapp-%i
-        ExecStop=/etc/systemd/scripts/webapp deregister 8080 myapp myapp-%i
+        ExecStartPost=/etc/systemd/scripts/webapp-registration register 8080 myapp myapp-%i
+        ExecStop=/etc/systemd/scripts/webapp-registration deregister 8080 myapp myapp-%i
         ExecStop=/usr/bin/docker stop myapp-%i
 
         [X-Fleet]
         Conflicts=myapp@*.service
+    - name: mysvc@.service
+      command: start
+      content: |
+        RestartSec=20s
+        [Unit]
+        Description=My Service
+        After=docker.service
+        Requires=docker.service
+
+        [Service]
+        TimeoutStartSec=0
+        ExecStartPre=-/usr/bin/docker kill mysvc-%i
+        ExecStartPre=-/usr/bin/docker rm mysvc-%i
+        ExecStartPre=/usr/bin/docker pull benschw/app
+        ExecStart=/usr/bin/docker run --name mysvc-%i -p 8080 benschw/app
+        ExecStartPost=/etc/systemd/scripts/webapp-registration register 8080 mysvc mysvc-%i
+        ExecStop=/etc/systemd/scripts/webapp-registration deregister 8080 mysvc mysvc-%i
+        ExecStop=/usr/bin/docker stop mysvc-%i
+
+        [X-Fleet]
+        Conflicts=mysvc@*.service
   update:
     group: alpha
     reboot-strategy: off
@@ -139,7 +160,7 @@ write_files:
             ip_str=$(printf " %s" "${ips[@]}")
             echo "--join ${ip_str:1}"
         fi
-  - path: /etc/systemd/scripts/webapp
+  - path: /etc/systemd/scripts/webapp-registration
     permissions: 0755
     owner: root
     content: |
@@ -149,17 +170,50 @@ write_files:
             port=$1
             svc_name=$2
             docker_name=$3
+            sleep 1
+
+            ETH1=`ifconfig | grep -A 1 eth1: | tail -n 1 | awk '{print $2}'`
+            PORT_EXT=`docker port $docker_name $port | awk -F: '{print $2}'`
+
+            # health="docker run -t -i benschw/health http://$ETH1:$PORT_EXT/status"
+            health="exit 0"
+            echo $health > /mnt/consul-services/tmp
+            /etc/systemd/scripts/registration register "$port" "$svc_name" "$docker_name" "$health" "5s"
+        }
+
+        deregister() {
+            port=$1
+            svc_name=$2
+            docker_name=$3
+
+            /etc/systemd/scripts/registration deregister "$port" "$svc_name" "$docker_name"
+        }
+
+        case $1 in
+          register) "$1" "$2" "$3" "$4";;
+          deregister) "$1" "$2" "$3" "$4";;
+        esac
+  - path: /etc/systemd/scripts/registration
+    permissions: 0755
+    owner: root
+    content: |
+        #!/bin/bash
+
+        register() {
+            port=$1
+            svc_name=$2
+            docker_name=$3
+            health_check=$4
+            ttl=$5
 
             sleep 1
 
-            ETH1=`ifconfig | grep -A 1 eth1 | tail -n 1 | awk '{print $2}'`
-            PORT_EXT=`docker port $docker_name $port | awk -F: '{print \$2}'`
+            ETH1=`ifconfig | grep -A 1 eth1: | tail -n 1 | awk '{print $2}'`
+            PORT_EXT=`docker port $docker_name $port | awk -F: '{print $2}'`
             
-            #HEALTH="docker run -t -i benschw/bat http://$ETH1:$PORT_EXT/greeting | grep '200 OK' > /dev/null"
-            HEALTH="exit 0"
-            
+            echo "$svc_name" "$ETH1" "$PORT_EXT" "$health_check" "$ttl" > /mnt/consul-services/tmp2
             printf '{"service":{"name":"%s","address":"%s","port":%s, "checks":[{"script":"%s","interval":"%s"}]}}\n' \
-                "$svc_name" "$ETH1" "$PORT_EXT" "$HEALTH" "5s" > \
+                "$svc_name" "$ETH1" "$PORT_EXT" "$health_check" "$ttl" > \
                  /mnt/consul-services/$docker_name.json
 
             systemctl reload consul-server
@@ -168,14 +222,16 @@ write_files:
         deregister() {
             port=$1
             svc_name=$2
-            docker_name=$3NewDefaultClb
+            docker_name=$3
 
             rm /mnt/consul-services/$docker_name.json
             systemctl reload consul-server
             sleep 5
         }
-
+        echo "$1" "$2" "$3" "$4" "$5" "$6" > /mnt/consul-services/tmp3
         case $1 in
-          register|deregister) "$1" $2 $3 $4;;
+          register) "$1" "$2" "$3" "$4" "$5" "$6";;
+          deregister) "$1" "$2" "$3" "$4";;
         esac
+
 
